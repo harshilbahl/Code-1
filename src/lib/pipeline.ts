@@ -1,25 +1,79 @@
 import { prisma } from "./db";
-import { webSearch } from "./search";
+import { webSearch, type SearchHit } from "./search";
 import { fetchPage, type PageContent } from "./fetch";
-import { extractProject } from "./extract";
+import { extractProject, type ExtractedProject } from "./extract";
 import { domainOf } from "./sources";
 
-export async function findProject(query: string): Promise<{ projectId: string }> {
-  const hits = await webSearch(query, 12);
-  if (hits.length === 0) throw new Error("No search results found");
+export type StreamEvent =
+  | { type: "search_started"; query: string }
+  | { type: "search_hits"; hits: SearchHit[] }
+  | { type: "fetch_started"; url: string; idx: number; total: number }
+  | { type: "fetch_done"; url: string; imageCount: number; pdfCount: number }
+  | { type: "fetch_failed"; url: string }
+  | { type: "image_found"; url: string; alt: string; sourceUrl: string }
+  | { type: "extract_started"; sourceCount: number }
+  | { type: "extract_done"; project: ExtractedProject }
+  | { type: "saved"; projectId: string }
+  | { type: "error"; message: string };
 
-  const pages: PageContent[] = [];
-  // Hits are already sorted by source priority. Fetch top 6.
-  const targets = hits.slice(0, 6);
-  const fetched = await Promise.all(targets.map((h) => fetchPage(h.url)));
-  for (let i = 0; i < fetched.length; i++) {
-    const page = fetched[i];
-    if (page && page.text.length > 200) pages.push(page);
+export async function* findProjectStream(query: string): AsyncGenerator<StreamEvent> {
+  yield { type: "search_started", query };
+
+  let hits: SearchHit[];
+  try {
+    hits = await webSearch(query, 12);
+  } catch (e) {
+    yield { type: "error", message: e instanceof Error ? e.message : "Search failed" };
+    return;
   }
-  if (pages.length === 0) throw new Error("Could not fetch any source pages");
+  if (hits.length === 0) {
+    yield { type: "error", message: "No search results found" };
+    return;
+  }
+  yield { type: "search_hits", hits };
 
-  const extracted = await extractProject(query, pages);
-  if (!extracted) throw new Error("Extraction failed");
+  const targets = hits.slice(0, 6);
+  const pages: PageContent[] = [];
+
+  for (let i = 0; i < targets.length; i++) {
+    const target = targets[i];
+    yield { type: "fetch_started", url: target.url, idx: i, total: targets.length };
+    const page = await fetchPage(target.url);
+    if (!page || page.text.length < 200) {
+      yield { type: "fetch_failed", url: target.url };
+      continue;
+    }
+    yield {
+      type: "fetch_done",
+      url: target.url,
+      imageCount: page.images.length,
+      pdfCount: page.pdfs.length,
+    };
+    for (const im of page.images.slice(0, 8)) {
+      yield { type: "image_found", url: im.url, alt: im.alt, sourceUrl: target.url };
+    }
+    pages.push(page);
+  }
+
+  if (pages.length === 0) {
+    yield { type: "error", message: "Could not fetch any source pages" };
+    return;
+  }
+
+  yield { type: "extract_started", sourceCount: pages.length };
+
+  let extracted: ExtractedProject | null;
+  try {
+    extracted = await extractProject(query, pages);
+  } catch (e) {
+    yield { type: "error", message: e instanceof Error ? e.message : "Extraction failed" };
+    return;
+  }
+  if (!extracted) {
+    yield { type: "error", message: "Could not parse a structured project from the sources" };
+    return;
+  }
+  yield { type: "extract_done", project: extracted };
 
   const project = await prisma.project.create({
     data: {
@@ -39,11 +93,7 @@ export async function findProject(query: string): Promise<{ projectId: string }>
       images: {
         create: (extracted.images ?? [])
           .filter((im) => /^https?:\/\//.test(im.url))
-          .map((im) => ({
-            url: im.url,
-            kind: im.kind,
-            caption: im.caption,
-          })),
+          .map((im) => ({ url: im.url, kind: im.kind, caption: im.caption })),
       },
       sources: {
         create: pages.map((p) => ({
@@ -55,5 +105,5 @@ export async function findProject(query: string): Promise<{ projectId: string }>
     },
   });
 
-  return { projectId: project.id };
+  yield { type: "saved", projectId: project.id };
 }
