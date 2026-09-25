@@ -1,0 +1,20 @@
+{
+  "name": "regain",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ReGain: mobile-first fitness, nutrition and weight-regain tracker (PWA)",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/dev.mjs",
+    "serve": "node scripts/serve.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.test.json && node --test \".test-build/tests/*.test.js\"",
+    "e2e": "node scripts/e2e.mjs",
+    "icons": "node scripts/make-icons.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^6.0.2"
+  }
+}
