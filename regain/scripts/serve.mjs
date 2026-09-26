@@ -24,4 +24,9 @@ createServer((req, res) => {
   if (!existsSync(file)) return res.writeHead(404).end('Not found');
   res.writeHead(200, { 'Content-Type': types[extname(file)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' });
   res.end(readFileSync(file));
-}).listen(port, '0.0.0.0', () => console.log(`ReGain on http://localhost:${port}`));
+})
+  .on('error', (e) => {
+    console.error('ReGain server failed to start: ' + e.message);
+    process.exit(1);
+  })
+  .listen(port, '0.0.0.0', () => console.log(`ReGain on http://localhost:${port}`));

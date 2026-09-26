@@ -13,7 +13,12 @@ const PORT = 5199;
 const BASE = `http://localhost:${PORT}/`;
 
 const server = spawn(process.execPath, ['scripts/serve.mjs', String(PORT)], { cwd: root, stdio: 'pipe' });
-await new Promise((r) => server.stdout.once('data', r));
+let serverErr = '';
+server.stderr.on('data', (d) => (serverErr += d));
+await new Promise((resolve, reject) => {
+  server.stdout.once('data', resolve);
+  server.once('exit', (code) => reject(new Error('serve.mjs exited (code ' + code + ') before listening — is port ' + PORT + ' already in use?\n' + serverErr.trim())));
+});
 
 const { chromium } = loadPlaywright();
 const browser = await chromium.launch();
@@ -49,7 +54,8 @@ async function check(name, fn) {
 const shot = (n) => page.screenshot({ path: `${shots}${n}.png`, fullPage: false });
 const tab = async (label) => {
   await page.locator(`.tabbar button[aria-label="${label}"]`).click();
-  await page.waitForTimeout(150);
+  // render() sets aria-current at the end of the rAF-scheduled re-render, so this waits for the screen swap
+  await page.locator(`.tabbar button[aria-label="${label}"][aria-current="page"]`).waitFor();
 };
 const sheet = (name) => (name ? page.getByRole('dialog', { name, exact: true }) : page.locator('.sheet-backdrop.open .sheet').last());
 const closeSheets = async () => {
@@ -60,11 +66,19 @@ const closeSheets = async () => {
   }
 };
 const text = async (sel) => (await page.locator(sel).first().innerText()).trim();
-
-await page.goto(BASE);
-await page.waitForSelector('body.ready');
+// First launch in a fresh profile: wait until the service worker has installed and claimed the page, so every
+// later check runs under SW control. main.tsx deliberately does NOT reload on the first-install controllerchange
+// (it only reloads when an updated worker takes over) — an unexpected reload here would hang any in-flight
+// screenshot until its timeout, which is exactly the bug this wait used to paper over.
+const firstLaunch = async (pg) => {
+  await pg.goto(BASE);
+  // a one-time boot wait (install precaches ~43 files), not a per-check assertion — allow more than the 5 s default
+  await pg.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 15000 });
+  await pg.waitForSelector('body.ready');
+};
 
 await check('Dashboard renders with preloaded BACK workout and targets', async () => {
+  await firstLaunch(page);
   await page.waitForSelector('.hero-head');
   const body = await page.locator('#main').innerText();
   assert.match(body, /BACK/);
@@ -96,7 +110,7 @@ await check('Natural-language entry parses, flags unknown food, logs matched ite
   const logBtn = sheet().getByRole('button', { name: /^Log 2 items/ });
   assert.match(await logBtn.innerText(), /618 kcal · 87\.2 g P/);
   await logBtn.click();
-  await page.waitForTimeout(300);
+  await page.locator('.totals-card', { hasText: '690' }).first().waitFor();
 });
 
 await check('Daily totals: calories and protein add up (72 + 288 + 330 = 690 kcal; 93.5 g P)', async () => {
@@ -112,14 +126,14 @@ await check('Edit meal: change 4 eggs → 2 eggs updates totals', async () => {
   const input = sheet().locator('.stepper input');
   await input.fill('2');
   await sheet().getByRole('button', { name: 'Save' }).click();
-  await page.waitForTimeout(300);
+  await page.locator('.totals-card', { hasText: '546' }).first().waitFor();
   assert.equal(await text('.totals-card .num-xl'), String(690 - 144));
 });
 
 await check('Delete meal entry (Egg) updates totals', async () => {
   await page.locator('.entry', { hasText: '1 piece ·' }).first().click();
   await sheet().getByRole('button', { name: 'Delete entry' }).click();
-  await page.waitForTimeout(300);
+  await page.locator('.totals-card', { hasText: '474' }).first().waitFor();
   assert.equal(await text('.totals-card .num-xl'), String(690 - 144 - 72));
 });
 
@@ -134,7 +148,7 @@ await check('Custom entry with manual macros', async () => {
   await nums.nth(2).fill('60');
   await nums.nth(3).fill('25');
   await s.getByRole('button', { name: 'Log entry' }).click();
-  await page.waitForTimeout(300);
+  await page.locator('.totals-card', { hasText: '1,124' }).first().waitFor();
   await closeSheets();
   assert.equal(await text('.totals-card .num-xl'), '1,124');
 });
@@ -144,7 +158,7 @@ await check('Log weight 60.4 kg', async () => {
   await page.getByRole('button', { name: '+ Log' }).click();
   await sheet().locator('.stepper input').fill('60.4');
   await sheet().getByRole('button', { name: 'Save' }).click();
-  await page.waitForTimeout(300);
+  await page.locator('#main', { hasText: '60.4' }).waitFor();
   assert.match(await page.locator('#main').innerText(), /60\.4/);
   await shot('05-weight');
 });
@@ -159,6 +173,8 @@ await check('Start workout, log T-Bar set 80×8 (volume 640) with one tap', asyn
   await tbar.locator('input[aria-label="Set 1 RIR"]').fill('2');
   await tbar.locator('button[aria-label="Log set"]').first().click();
   await page.waitForSelector('.rest-timer');
+  // The rest timer is drawn synchronously by toggle(); the stat strip re-renders on the store's change tick, so wait on the number.
+  await page.locator('.stat-strip', { hasText: '640' }).first().waitFor();
   assert.match(await text('.stat-strip'), /640/);
   await shot('06-workout');
 });
@@ -166,7 +182,7 @@ await check('Start workout, log T-Bar set 80×8 (volume 640) with one tap', asyn
 await check('Second set pre-fills from previous set: tap ✓ only', async () => {
   const tbar = page.locator('.ex-card', { hasText: 'T-Bar Row' });
   await tbar.locator('button[aria-label="Log set"]').first().click();
-  await page.waitForTimeout(200);
+  await page.locator('.stat-strip', { hasText: '1,280' }).first().waitFor();
   assert.match(await text('.stat-strip'), /1,280/);
 });
 
@@ -175,7 +191,7 @@ await check('Weighted pull-up volume uses body weight + added (60.4+10)×8 = 563
   await pu.locator('input[aria-label="Set 1 weight"]').fill('10');
   await pu.locator('input[aria-label="Set 1 reps"]').fill('8');
   await pu.locator('button[aria-label="Log set"]').first().click();
-  await page.waitForTimeout(200);
+  await page.locator('.stat-strip', { hasText: '1,843' }).first().waitFor();
   assert.match(await text('.stat-strip'), /1,843/);
 });
 
@@ -184,14 +200,18 @@ await check('Unilateral exercise counts both sides: 30×10/side = 600', async ()
   await sa.locator('input[aria-label="Set 1 weight"]').fill('30');
   await sa.locator('input[aria-label="Set 1 reps"]').fill('10');
   await sa.locator('button[aria-label="Log set"]').first().click();
-  await page.waitForTimeout(200);
+  await page.locator('.stat-strip', { hasText: '2,443' }).first().waitFor();
   assert.match(await text('.stat-strip'), /2,443/);
 });
 
 await check('Swap exercise (pull-up → lat pulldown suggestion is offered)', async () => {
-  await page.locator('button[aria-label="Options for Straight-Arm Pulldown"]').click();
-  await sheet('Straight-Arm Pulldown').getByRole('button', { name: '⇄ Swap exercise' }).click();
-  assert.ok(await sheet('Swap Straight-Arm Pulldown').getByRole('button', { name: /Heavy Lat Pulldown/ }).count());
+  // Weighted Pull-up declares alternatives (seed.ts) — Straight-Arm Pulldown has none, and every exercise
+  // appears somewhere in the swap sheet anyway, so asserting on it could never fail.
+  await page.locator('button[aria-label="Options for Weighted Pull-up"]').click();
+  await sheet('Weighted Pull-up').getByRole('button', { name: '⇄ Swap exercise' }).click();
+  const swap = sheet('Swap Weighted Pull-up');
+  await swap.locator('.list-heading', { hasText: 'Suggested alternatives' }).waitFor();
+  assert.match(await swap.locator('.list-btn').first().innerText(), /Heavy Lat Pulldown/);
   await closeSheets();
 });
 
@@ -228,7 +248,7 @@ await check('Recovery log from dashboard', async () => {
   await s.locator('.stepper input').fill('6');
   await s.locator('.segmented').nth(1).getByRole('tab', { name: '2' }).click();
   await s.getByRole('button', { name: 'Save' }).click();
-  await page.waitForTimeout(300);
+  await page.locator('.mini-stat', { hasText: '2/5' }).first().waitFor();
   assert.match(await page.locator('#main').innerText(), /2\/5/);
 });
 
@@ -236,7 +256,7 @@ await check('Weekly report renders (this week + previous) with observations and 
   await tab('Report');
   await page.waitForSelector('text=Observations');
   await page.locator('button[aria-label="Next week"]').click();
-  await page.waitForTimeout(200);
+  await page.locator('.date-nav .center-text', { hasText: 'This week' }).waitFor();
   const body = await page.locator('#main').innerText();
   assert.match(body, /Average intake was 1,124 kcal\/day/);
   assert.match(body, /1 session completed/);
@@ -249,19 +269,19 @@ await check('Planner: swap chicken → eggs keeps protein, log planned meal', as
   await page.getByRole('button', { name: /Diet planner/ }).click();
   await page.waitForSelector('.day-tabs');
   await page.locator('.day-tab', { hasText: 'Mon' }).click();
-  await page.waitForTimeout(150);
+  await page.locator('.day-tab.active', { hasText: 'Mon' }).waitFor();
   await page.locator('.entry', { hasText: 'Chicken breast (cooked)' }).first().click();
   await sheet().getByRole('button', { name: /Egg \(large\) · 7\.5 pieces/ }).click();
-  await page.waitForTimeout(250);
-  assert.ok(await page.locator('.entry', { hasText: 'Egg (large)' }).count());
+  await page.locator('.entry', { hasText: 'Egg (large)' }).first().waitFor();
+  assert.equal(await page.locator('.entry', { hasText: 'Chicken breast (cooked)' }).count(), 0);
   await shot('10-planner');
 });
 
 await check('Charts screen renders 4 charts', async () => {
   await tab('More');
   await page.getByRole('button', { name: /Charts/ }).click();
-  await page.waitForTimeout(200);
-  assert.ok((await page.locator('svg.chart').count()) >= 3);
+  await page.locator('svg.chart').nth(3).waitFor();
+  assert.equal(await page.locator('svg.chart').count(), 4);
   await shot('11-charts');
 });
 
@@ -270,7 +290,7 @@ await check('Settings: edit calorie target → history + dashboard reflect it', 
   await page.getByRole('button', { name: /Targets & profile/ }).click();
   await page.locator('.field', { hasText: 'Calories (kcal)' }).locator('input').fill('2500');
   await page.getByRole('button', { name: 'Save settings' }).click();
-  await page.waitForTimeout(250);
+  await page.locator('.toast', { hasText: 'Saved' }).waitFor();
   await tab('Home');
   assert.match(await page.locator('#main').innerText(), /2,500 kcal/);
 });
@@ -303,7 +323,8 @@ await check('Reset requires typing RESET, then clears data', async () => {
   assert.equal(await confirmBtn.isDisabled(), true);
   await sheet('Reset everything?').locator('input').fill('RESET');
   await confirmBtn.click();
-  await page.waitForTimeout(500);
+  await page.locator('.toast', { hasText: 'All data reset' }).waitFor(); // fires only after resetAll() resolves
+  await page.locator('#main', { hasText: '2,400 kcal' }).waitFor();
   const body = await page.locator('#main').innerText();
   assert.match(body, /2,400 kcal/);
   assert.doesNotMatch(body, /60\.4/);
@@ -314,8 +335,9 @@ await check('Import restores the backup', async () => {
   await page.getByRole('button', { name: /Backup & data/ }).click();
   await page.locator('input[type=file]').setInputFiles(backupPath);
   await sheet('Replace all data?').getByRole('button', { name: 'Import & replace' }).click();
-  await page.waitForTimeout(500);
+  await page.locator('.toast', { hasText: 'Backup restored' }).waitFor(); // fires only after store.replaceAll() resolves
   await tab('Home');
+  await page.locator('#main', { hasText: '2,500 kcal' }).waitFor();
   const body = await page.locator('#main').innerText();
   assert.match(body, /2,500 kcal/);
   assert.match(body, /60\.4/);
@@ -346,7 +368,7 @@ await check('No horizontal overflow on any tab at 390px and 320px widths', async
     await page.setViewportSize({ width: w, height: 800 });
     for (const t of ['Home', 'Meals', 'Workout', 'Weight', 'Report', 'More']) {
       await tab(t);
-      await page.waitForTimeout(120);
+      await page.evaluate(() => new Promise(requestAnimationFrame)); // one settled frame before measuring
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       assert.ok(overflow <= 0, `${t} at ${w}px overflows by ${overflow}px`);
     }
@@ -356,11 +378,14 @@ await check('No horizontal overflow on any tab at 390px and 320px widths', async
 
 await check('Desktop layout (1280px) renders without errors', async () => {
   const desk = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  desk.setDefaultTimeout(5000); // newPage creates its own context, which does not inherit the 5 s default
   desk.on('pageerror', (e) => errors.push('desktop pageerror: ' + e.message));
-  await desk.goto(BASE);
-  await desk.waitForSelector('body.ready');
-  await desk.screenshot({ path: shots + '12-desktop.png' });
-  await desk.close();
+  try {
+    await firstLaunch(desk); // a fresh context, so the service worker installs and claims here too
+    await desk.screenshot({ path: shots + '12-desktop.png' });
+  } finally {
+    await desk.close();
+  }
 });
 
 await check('No JavaScript errors in console', async () => {
