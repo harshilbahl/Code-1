@@ -32,7 +32,9 @@ const version = hash.digest('hex').slice(0, 10);
 const index = join(dist, 'index.html');
 writeFileSync(index, readFileSync(index, 'utf8').replaceAll('__VERSION__', version));
 
-const assets = ['./', ...files.map((f) => './' + f)];
+// _headers is hosting config (Netlify/Cloudflare Pages); such hosts do not serve it, and cache.addAll
+// is all-or-nothing — precaching it there would fail the whole SW install and disable offline mode.
+const assets = ['./', ...files.filter((f) => f !== '_headers').map((f) => './' + f)];
 const sw = readFileSync(join(root, 'public/sw.template.js'), 'utf8')
   .replace('__VERSION__', version)
   .replace('__ASSETS__', JSON.stringify(assets, null, 2));

@@ -155,11 +155,15 @@ function installSwipeBack() {
 
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || location.protocol === 'file:') return;
+  // Reload only when an updated worker takes over — not on the first-install claim, which would
+  // reload the page moments after first paint (dropping an open sheet or a running rest timer).
+  const hadController = !!navigator.serviceWorker.controller;
+  let wantReload = false;
   navigator.serviceWorker
     .register('./sw.js')
     .then((reg) => {
       const prompt = (w: ServiceWorker) =>
-        toast('A new version of ReGain is ready', { label: 'Reload', run: () => w.postMessage('skipWaiting') }, 15000);
+        toast('A new version of ReGain is ready', { label: 'Reload', run: () => ((wantReload = true), w.postMessage('skipWaiting')) }, 15000);
       if (reg.waiting && navigator.serviceWorker.controller) prompt(reg.waiting);
       reg.addEventListener('updatefound', () => {
         const w = reg.installing;
@@ -173,7 +177,7 @@ function registerServiceWorker() {
     .catch((e) => console.warn('SW registration failed', e));
   let reloading = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (reloading) return;
+    if ((!hadController && !wantReload) || reloading) return;
     reloading = true;
     location.reload();
   });
