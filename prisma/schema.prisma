@@ -1,0 +1,57 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  id             String   @id @default(cuid())
+  name           String
+  builder        String?
+  location       String?
+  city           String?
+  rera           String?
+  configurations String?
+  priceMin       Float?
+  priceMax       Float?
+  priceUnit      String?
+  status         String?
+  possession     String?
+  amenities      String?
+  description    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  images         Image[]
+  sources        Source[]
+
+  @@index([name])
+  @@index([city])
+}
+
+model Image {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  url       String
+  kind      String
+  caption   String?
+  sourceUrl String?
+
+  @@index([projectId])
+  @@index([kind])
+}
+
+model Source {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  url       String
+  domain    String
+  title     String?
+  fetchedAt DateTime @default(now())
+
+  @@index([projectId])
+}
