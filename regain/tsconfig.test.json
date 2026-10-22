@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": ".test-build",
+    "lib": ["ES2021", "DOM"],
+    "types": ["node"],
+    "noUnusedLocals": false
+  },
+  "include": ["src/domain", "src/data/memory.ts", "src/data/types.ts", "src/data/store.ts", "src/data/backup.ts", "tests"]
+}
