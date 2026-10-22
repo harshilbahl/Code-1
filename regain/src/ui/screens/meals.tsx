@@ -1,7 +1,7 @@
 import { addDays, formatDay } from '../../domain/dates.js';
 import { MEAL_TYPE_LABEL, dayTotals, mealsOn, sumMacros } from '../../domain/nutrition.js';
 import { MEAL_TYPES, type MealType } from '../../domain/types.js';
-import { uid } from '../../data/store.js';
+import { uid } from '../../domain/ids.js';
 import { Card, EstPill, Header, Progress, fmt1, fmtInt } from '../components.js';
 import { S, app } from '../context.js';
 import { h } from '../h.js';

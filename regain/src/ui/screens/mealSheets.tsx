@@ -1,4 +1,4 @@
-import { uid } from '../../data/store.js';
+import { uid } from '../../domain/ids.js';
 import { RuleBasedMealParser, type ParsedItem, matchScore } from '../../domain/mealParser.js';
 import { MEAL_TYPE_LABEL, caloriesFromMacros, defaultMealType, foodMacros, quantityLabel, servingLabel } from '../../domain/nutrition.js';
 import { MEAL_TYPES, type Food, type MealEntry, type MealType, type ServingUnit, type SubstitutionGroup } from '../../domain/types.js';

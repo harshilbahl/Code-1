@@ -1,13 +1,9 @@
 import { dateKey } from '../domain/dates.js';
+import { uid } from '../domain/ids.js';
 import { BACK_TEMPLATE, SEED_EXERCISES, SEED_FOODS, defaultMealPlan, defaultProfile, defaultSettings, workoutFromTemplate } from '../domain/seed.js';
 import { COLLECTIONS, type CollectionName, type Collections, type Settings, type UserProfile } from '../domain/types.js';
 import type { BackupData } from './backup.js';
 import type { StorageAdapter } from './types.js';
-
-export function uid(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
-  return 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
-}
 
 type Cache = { [K in CollectionName]: Map<string, Collections[K]> };
 type Listener = () => void;

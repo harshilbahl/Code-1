@@ -1,4 +1,4 @@
-import { uid } from '../../data/store.js';
+import { uid } from '../../domain/ids.js';
 import { addDays, formatRange, startOfWeek, weekdayShort, weekday } from '../../domain/dates.js';
 import { buildWeeklyReport } from '../../domain/report.js';
 import type { WeeklyReportRecord } from '../../domain/types.js';

@@ -1,4 +1,4 @@
-import { uid } from '../../data/store.js';
+import { uid } from '../../domain/ids.js';
 import { addDays, formatDay, formatShort, rangeDays, startOfWeek } from '../../domain/dates.js';
 import type { BodyWeightEntry } from '../../domain/types.js';
 import { TREND_ARROW, latestEntry, rollingSeries, sortedByDate, weeklyAverages, weightTrend } from '../../domain/weight.js';

@@ -1,4 +1,4 @@
-import { uid } from '../../data/store.js';
+import { uid } from '../../domain/ids.js';
 import { formatDay, weekday } from '../../domain/dates.js';
 import { workoutFromTemplate } from '../../domain/seed.js';
 import type { Exercise, MuscleGroup, Workout, WorkoutExercise, WorkoutSet, WorkoutTemplate } from '../../domain/types.js';

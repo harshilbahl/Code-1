@@ -1,4 +1,4 @@
-import { uid } from '../../data/store.js';
+import { uid } from '../../domain/ids.js';
 import { formatDay } from '../../domain/dates.js';
 import { RECOVERY_RULES, recoveryFlags, recoveryLast7 } from '../../domain/recovery.js';
 import type { RecoveryEntry } from '../../domain/types.js';

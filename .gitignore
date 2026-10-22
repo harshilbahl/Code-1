@@ -9,3 +9,4 @@ prisma/migrations/dev
 .DS_Store
 .vercel
 next-env.d.ts
+graphify-out/
